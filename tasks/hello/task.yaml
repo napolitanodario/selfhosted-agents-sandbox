@@ -1,0 +1,19 @@
+id: hello
+title: Saluto dalla sandbox
+description: Smoke test dell'harness. Esegue un programma Python già presente nel workspace.
+image: python:3.12
+workdir: /workspace
+timeout_minutes: 10
+ready_timeout_seconds: 180
+command_timeout_seconds: 60
+resources:
+  cpu: "1"
+  memory: 512Mi
+agent:
+  kind: scripted
+  commands:
+    - python main.py
+checks:
+  - name: output
+    command: python main.py
+    expect_stdout_contains: hello

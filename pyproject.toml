@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "selfhosted-agents-sandbox"
+version = "0.1.0"
+description = "Harness locale per eseguire task di programmazione in sandbox OpenSandbox."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Dario Napolitano" }]
+keywords = ["opensandbox", "agents", "sandbox", "harness"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Typing :: Typed",
+]
+dependencies = [
+    "opensandbox>=1.2.0",
+    "pyyaml>=6",
+]
+
+[project.urls]
+Homepage = "https://github.com/napolitanodario/selfhosted-agents-sandbox"
+Repository = "https://github.com/napolitanodario/selfhosted-agents-sandbox"
+
+[project.scripts]
+agent-harness = "agent_harness.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

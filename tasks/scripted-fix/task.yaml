@@ -1,0 +1,28 @@
+id: scripted-fix
+title: Patch deterministica di fizzbuzz
+description: Stesso workspace di fix-fizzbuzz, risolto da comandi fissi. Dimostra il ciclo dell'harness senza una CLI di modello.
+image: python:3.12
+workdir: /workspace
+workspace: ../fix-fizzbuzz/workspace
+timeout_minutes: 10
+command_timeout_seconds: 60
+agent:
+  kind: scripted
+  commands:
+    - |
+      python - <<'PY'
+      from pathlib import Path
+      Path("fizzbuzz.py").write_text(
+          "def fizzbuzz(n: int) -> str:\n"
+          "    if n % 15 == 0:\n"
+          "        return \"fizzbuzz\"\n"
+          "    if n % 3 == 0:\n"
+          "        return \"fizz\"\n"
+          "    if n % 5 == 0:\n"
+          "        return \"buzz\"\n"
+          "    return str(n)\n"
+      )
+      PY
+checks:
+  - name: unit
+    command: python -m unittest test_fizzbuzz.py
