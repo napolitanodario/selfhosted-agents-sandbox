@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "selfhosted-agents-sandbox"
 version = "0.1.0"
-description = "Harness locale per eseguire task di programmazione in sandbox OpenSandbox."
+description = "Local harness for programming tasks in an OpenSandbox sandbox."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

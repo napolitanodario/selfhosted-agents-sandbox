@@ -1,4 +1,4 @@
-"""Interfaccia a riga di comando dell'harness."""
+"""Command-line interface for the harness."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from agent_harness.session import OpenSandboxFactory, load_settings
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse arguments and run list, validate, or run. Return a process exit code."""
     parser = _parser()
     args = parser.parse_args(argv)
     try:
@@ -26,47 +27,49 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "run":
             return asyncio.run(_run(args))
     except HarnessError as exc:
-        print(f"errore: {exc}", file=sys.stderr)
+        print(f"error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
-        print("interrotto", file=sys.stderr)
+        print("interrupted", file=sys.stderr)
         return 130
-    raise HarnessError(f"comando sconosciuto: {args.command}")
+    raise HarnessError(f"unknown command: {args.command}")
 
 
 def _parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the three harness subcommands."""
     parser = argparse.ArgumentParser(
         prog="agent-harness",
-        description="Esegue task di programmazione in una sandbox OpenSandbox locale.",
+        description="Run programming tasks in a local OpenSandbox sandbox.",
     )
     parser.add_argument("--version", action="version", version=f"agent-harness {__version__}")
     parser.add_argument(
         "--tasks-dir",
         type=Path,
         default=Path("tasks"),
-        help="directory dei task (default: ./tasks)",
+        help="task directory (default: ./tasks)",
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
 
-    subcommands.add_parser("list", help="elenca i task")
+    subcommands.add_parser("list", help="list tasks")
 
-    validate = subcommands.add_parser("validate", help="controlla i file di task")
-    validate.add_argument("task_id", nargs="?", help="limita il controllo a un task")
+    validate = subcommands.add_parser("validate", help="check task files")
+    validate.add_argument("task_id", nargs="?", help="limit the check to one task")
 
-    run = subcommands.add_parser("run", help="esegue un task o tutti i task")
-    run.add_argument("task_id", nargs="?", help="id del task")
-    run.add_argument("--all", action="store_true", help="esegue ogni task in sequenza")
-    run.add_argument("--keep", action="store_true", help="non distrugge la sandbox a fine run")
+    run = subcommands.add_parser("run", help="run one task or every task")
+    run.add_argument("task_id", nargs="?", help="task id")
+    run.add_argument("--all", action="store_true", help="run every task in order")
+    run.add_argument("--keep", action="store_true", help="do not destroy the sandbox at the end")
     run.add_argument(
         "--report-dir",
         type=Path,
         default=Path("runs"),
-        help="directory dei report JSON (default: ./runs)",
+        help="directory for JSON reports (default: ./runs)",
     )
     return parser
 
 
 def _list(tasks_dir: Path) -> int:
+    """Print id, agent, and title for every task. Return 0."""
     tasks = discover_tasks(tasks_dir)
     for task in tasks:
         agent = task.agent.kind
@@ -77,16 +80,19 @@ def _list(tasks_dir: Path) -> int:
 
 
 def _validate(tasks_dir: Path, task_id: str | None) -> int:
+    """Load the selected tasks and print a one-line summary for each."""
     tasks = _select(tasks_dir, task_id)
     for task in tasks:
-        files = len(task.files)
-        print(f"ok\t{task.id}\t{files} file\t{task.image}")
+        count = len(task.files)
+        noun = "file" if count == 1 else "files"
+        print(f"ok\t{task.id}\t{count} {noun}\t{task.image}")
     return 0
 
 
 async def _run(args: argparse.Namespace) -> int:
+    """Run the selected tasks against the configured OpenSandbox server."""
     if bool(args.task_id) == bool(args.all):
-        raise HarnessError("indica un task_id oppure --all")
+        raise HarnessError("pass a task_id or --all")
     tasks = _select(args.tasks_dir, None if args.all else args.task_id)
     settings = load_settings(dict(os.environ))
     factory = OpenSandboxFactory(settings)
@@ -105,6 +111,7 @@ async def _run(args: argparse.Namespace) -> int:
 
 
 def _select(tasks_dir: Path, task_id: str | None) -> list[Task]:
+    """Load every task, or the single task whose directory name is ``task_id``."""
     if task_id is None:
         return discover_tasks(tasks_dir)
     path = tasks_dir / task_id / "task.yaml"

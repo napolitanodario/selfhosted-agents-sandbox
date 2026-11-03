@@ -1,8 +1,8 @@
-"""Adattatori degli agenti eseguiti dentro la sandbox.
+"""Agent adapters that run inside the sandbox.
 
-``scripted`` ripete comandi dichiarati nel task: serve per il fumo e per
-riprodurre una patch senza un modello. ``coding-cli`` installa una CLI di
-coding agent nell'immagine e le consegna il prompt del task.
+``scripted`` repeats commands declared in the task. It is enough for a smoke
+test and for replaying a patch without a model. ``coding-cli`` installs a
+coding-agent CLI in the image and hands it the task prompt.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from agent_harness.models import AgentPlan, AgentSpec, HarnessError, Task
 
 @dataclass(frozen=True)
 class _Provider:
+    """Built-in coding CLI: install line, command, and host env to forward."""
+
     install: tuple[str, ...]
     command: str
     forward: tuple[str, ...]
@@ -23,6 +25,7 @@ class _Provider:
 
 
 def _claude_command(prompt_file: str) -> str:
+    """Build the headless Claude Code command for a prompt file in the sandbox."""
     quoted = shlex.quote(prompt_file)
     return (
         f'claude -p "$(cat {quoted})" --output-format json '
@@ -31,6 +34,7 @@ def _claude_command(prompt_file: str) -> str:
 
 
 def _codex_command(prompt_file: str) -> str:
+    """Build the headless Codex command for a prompt file in the sandbox."""
     quoted = shlex.quote(prompt_file)
     return (
         "codex exec --json --sandbox workspace-write --ask-for-approval never "
@@ -39,6 +43,7 @@ def _codex_command(prompt_file: str) -> str:
 
 
 def _providers(prompt_file: str) -> dict[str, _Provider]:
+    """Return the built-in coding CLIs keyed by provider name."""
     return {
         "claude": _Provider(
             install=("npm i -g @anthropic-ai/claude-code@latest",),
@@ -61,6 +66,7 @@ def _providers(prompt_file: str) -> dict[str, _Provider]:
 
 
 def resolve_plan(task: Task, environ: dict[str, str]) -> AgentPlan:
+    """Turn a task agent spec into install commands, the run command, and env."""
     prompt_file = f"{task.workdir.rstrip('/')}/.harness/prompt.md"
     spec = task.agent
     if spec.kind == "scripted":
@@ -74,7 +80,7 @@ def resolve_plan(task: Task, environ: dict[str, str]) -> AgentPlan:
             stop_on_failure=True,
         )
     if spec.kind != "coding-cli":
-        raise HarnessError(f"agente non supportato: {spec.kind}")
+        raise HarnessError(f"unsupported agent: {spec.kind}")
 
     provider_name = spec.provider or "custom"
     known = _providers(prompt_file)
@@ -82,7 +88,7 @@ def resolve_plan(task: Task, environ: dict[str, str]) -> AgentPlan:
     install = spec.install if spec.install is not None else (provider.install if provider else ())
     command = spec.command or (provider.command if provider else None)
     if not command:
-        raise HarnessError(f"{task.id}: comando dell'agente assente")
+        raise HarnessError(f"{task.id}: agent command is missing")
     command = command.replace("{prompt_file}", shlex.quote(prompt_file))
 
     forward = spec.env
@@ -113,18 +119,21 @@ def resolve_plan(task: Task, environ: dict[str, str]) -> AgentPlan:
 
 
 def ensure_plan(plan: AgentPlan) -> None:
+    """Raise when the host is missing an environment variable the agent needs."""
     if plan.missing:
         raise HarnessError(
-            "variabili d'ambiente mancanti per l'agente: " + ", ".join(plan.missing)
+            "missing environment variables for the agent: " + ", ".join(plan.missing)
         )
 
 
 def _forward(names: tuple[str, ...], environ: dict[str, str]) -> dict[str, str]:
+    """Copy named variables from the host, skipping names that are unset or empty."""
     return {name: environ[name] for name in names if environ.get(name)}
 
 
 def _missing(spec: AgentSpec, environ: dict[str, str]) -> tuple[str, ...]:
+    """List required variables that are absent. ``required_any`` counts as one group."""
     missing = [name for name in spec.required_env if not environ.get(name)]
     if spec.required_any and not any(environ.get(name) for name in spec.required_any):
-        missing.append(" oppure ".join(spec.required_any))
+        missing.append(" or ".join(spec.required_any))
     return tuple(missing)

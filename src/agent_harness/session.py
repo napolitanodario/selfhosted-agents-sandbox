@@ -1,8 +1,8 @@
-"""Sessione di sandbox usata dall'harness.
+"""Sandbox session used by the harness.
 
-Il resto del progetto dipende solo da ``SandboxSession``. L'SDK OpenSandbox
-viene importato quando si apre una sessione vera, così i test del harness
-non hanno bisogno del server.
+The rest of the project depends only on ``SandboxSession``. The OpenSandbox
+SDK is imported when a real session is opened, so harness tests do not need
+the server.
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ from agent_harness.models import CommandResult, Task
 
 @dataclass(frozen=True)
 class Settings:
+    """Connection settings for the local OpenSandbox server."""
+
     domain: str = "localhost:8080"
     protocol: str = "http"
     api_key: str | None = None
@@ -25,9 +27,12 @@ class Settings:
 
 
 class SandboxSession(Protocol):
+    """Files and commands inside one sandbox, plus a way to destroy it."""
+
     id: str
 
-    async def write_text(self, path: str, data: str, mode: int = 644) -> None: ...
+    async def write_text(self, path: str, data: str, mode: int = 644) -> None:
+        """Write a text file at an absolute path inside the sandbox."""
 
     async def run(
         self,
@@ -35,16 +40,22 @@ class SandboxSession(Protocol):
         *,
         cwd: str,
         timeout: timedelta | None,
-    ) -> CommandResult: ...
+    ) -> CommandResult:
+        """Run a shell command in ``cwd`` and return its output."""
 
-    async def destroy(self) -> None: ...
+    async def destroy(self) -> None:
+        """Terminate the remote sandbox and release local client resources."""
 
 
 class SandboxFactory(Protocol):
-    async def open(self, task: Task, env: dict[str, str]) -> SandboxSession: ...
+    """Opens a sandbox session for one task."""
+
+    async def open(self, task: Task, env: dict[str, str]) -> SandboxSession:
+        """Create a sandbox for ``task`` with ``env`` injected into the container."""
 
 
 def load_settings(environ: dict[str, str]) -> Settings:
+    """Read server domain, protocol, API key, and proxy flag from the environment."""
     api_key = environ.get("SANDBOX_API_KEY") or environ.get("OPEN_SANDBOX_API_KEY") or None
     if api_key is not None and not api_key.strip():
         api_key = None
@@ -52,7 +63,7 @@ def load_settings(environ: dict[str, str]) -> Settings:
     try:
         timeout_seconds = int(timeout)
     except ValueError as exc:
-        raise ValueError("SANDBOX_REQUEST_TIMEOUT_SECONDS deve essere un intero") from exc
+        raise ValueError("SANDBOX_REQUEST_TIMEOUT_SECONDS must be an integer") from exc
     proxy = environ.get("SANDBOX_USE_SERVER_PROXY", "true").strip().lower()
     return Settings(
         domain=environ.get("SANDBOX_DOMAIN")
@@ -66,6 +77,7 @@ def load_settings(environ: dict[str, str]) -> Settings:
 
 
 def build_create_kwargs(task: Task, env: dict[str, str]) -> dict:
+    """Build the keyword arguments ``Sandbox.create`` accepts for this task."""
     kwargs: dict = {
         "timeout": timedelta(minutes=task.timeout_minutes),
         "ready_timeout": timedelta(seconds=task.ready_timeout_seconds),
@@ -82,10 +94,14 @@ def build_create_kwargs(task: Task, env: dict[str, str]) -> dict:
 
 
 class OpenSandboxFactory:
+    """Creates real OpenSandbox sessions from harness settings."""
+
     def __init__(self, settings: Settings) -> None:
+        """Store the server connection settings used for every sandbox."""
         self.settings = settings
 
     async def open(self, task: Task, env: dict[str, str]) -> SandboxSession:
+        """Create a sandbox from the task image and wrap it in a session."""
         from opensandbox import Sandbox
         from opensandbox.config import ConnectionConfig
 
@@ -106,11 +122,15 @@ class OpenSandboxFactory:
 
 
 class OpenSandboxSession:
+    """``SandboxSession`` backed by the OpenSandbox Python SDK."""
+
     def __init__(self, sandbox) -> None:
+        """Keep the SDK sandbox and expose its id."""
         self._sandbox = sandbox
         self.id = str(sandbox.id)
 
     async def write_text(self, path: str, data: str, mode: int = 644) -> None:
+        """Write a text file through the sandbox filesystem API."""
         from opensandbox.models.filesystem import WriteEntry
 
         await self._sandbox.files.write_files(
@@ -124,13 +144,16 @@ class OpenSandboxSession:
         cwd: str,
         timeout: timedelta | None,
     ) -> CommandResult:
+        """Run a shell command, streaming stdout and stderr to this process."""
         from opensandbox.models.execd import ExecutionHandlers, RunCommandOpts
 
         async def on_stdout(message) -> None:
+            """Write one stdout chunk from the sandbox to this process."""
             sys.stdout.write(message.text)
             sys.stdout.flush()
 
         async def on_stderr(message) -> None:
+            """Write one stderr chunk from the sandbox to this process."""
             sys.stderr.write(message.text)
             sys.stderr.flush()
 
@@ -144,10 +167,12 @@ class OpenSandboxSession:
         return result
 
     async def destroy(self) -> None:
+        """Terminate the remote sandbox and close the local SDK client."""
         await self._sandbox.destroy()
 
 
 def execution_to_result(command: str, execution) -> CommandResult:
+    """Map an OpenSandbox execution object onto a ``CommandResult``."""
     logs = execution.logs
     stdout = _texts(getattr(logs, "stdout", []) or [])
     stderr = _texts(getattr(logs, "stderr", []) or [])
@@ -172,4 +197,5 @@ def execution_to_result(command: str, execution) -> CommandResult:
 
 
 def _texts(messages) -> str:
+    """Join execution log messages into one string."""
     return "".join(getattr(message, "text", str(message)) for message in messages)

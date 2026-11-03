@@ -1,6 +1,6 @@
 id: scripted-fix
-title: Patch deterministica di fizzbuzz
-description: Stesso workspace di fix-fizzbuzz, risolto da comandi fissi. Dimostra il ciclo dell'harness senza una CLI di modello.
+title: Deterministic fizzbuzz patch
+description: Same workspace as fix-fizzbuzz, solved by fixed commands. Shows the harness loop without a model CLI.
 image: python:3.12
 workdir: /workspace
 workspace: ../fix-fizzbuzz/workspace

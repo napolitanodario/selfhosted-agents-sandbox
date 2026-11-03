@@ -1,6 +1,6 @@
 id: fix-fizzbuzz
-title: Correggi fizzbuzz
-description: L'implementazione di fizzbuzz è incompleta. L'agente deve far passare i test senza modificarli.
+title: Fix fizzbuzz
+description: The fizzbuzz implementation is incomplete. The agent must make the tests pass without editing them.
 image: opensandbox/code-interpreter:v1.1.0
 workdir: /workspace
 timeout_minutes: 20
@@ -13,9 +13,9 @@ agent:
   kind: coding-cli
   provider: claude
 prompt: |
-  Il file fizzbuzz.py restituisce sempre la rappresentazione decimale del numero.
-  Correggilo in modo che test_fizzbuzz.py passi con `python -m unittest`.
-  Non modificare i test.
+  fizzbuzz.py always returns the decimal representation of the number.
+  Fix it so test_fizzbuzz.py passes under `python -m unittest`.
+  Do not modify the tests.
 checks:
   - name: unit
     command: python -m unittest test_fizzbuzz.py

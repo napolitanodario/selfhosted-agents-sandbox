@@ -1,3 +1,5 @@
+"""Harness tests that use a fake sandbox instead of OpenSandbox."""
+
 import json
 import os
 import tempfile
@@ -18,17 +20,22 @@ TASKS = ROOT / "tasks"
 
 
 def _task(name: str):
+    """Load one sample task by directory name."""
     return load_task(TASKS / name / "task.yaml")
 
 
 class HarnessTest(unittest.TestCase):
+    """Covers seeding, checks, env forwarding, and sandbox cleanup."""
+
     def test_hello_passes_and_destroys_the_sandbox(self) -> None:
+        """A passing scripted task seeds the workspace and destroys the sandbox."""
         factory = FakeFactory()
         with tempfile.TemporaryDirectory() as raw:
             report = self._run(_task("hello"), factory, Path(raw))
             self.assertEqual(report.status, "passed")
             self.assertTrue(factory.session.destroyed)
-            self.assertEqual(factory.session.files["/workspace/main.py"], 'print("hello")\n')
+            expected = (TASKS / "hello" / "workspace" / "main.py").read_text(encoding="utf-8")
+            self.assertEqual(factory.session.files["/workspace/main.py"], expected)
             self.assertIn("Smoke test", factory.session.files["/workspace/.harness/prompt.md"])
             mkdir = factory.session.commands[0][0]
             self.assertIn("/workspace/.harness", mkdir)
@@ -39,6 +46,7 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(saved["checks"][0]["passed"], True)
 
     def test_failed_check_still_destroys_the_sandbox(self) -> None:
+        """A failed check is reported and the sandbox is still destroyed."""
         def handler(command: str) -> CommandResult:
             if command.startswith("mkdir"):
                 return CommandResult(command=command, exit_code=0, stdout="", stderr="")
@@ -53,6 +61,7 @@ class HarnessTest(unittest.TestCase):
         self.assertFalse(report.checks[0].passed)
 
     def test_keep_leaves_the_sandbox(self) -> None:
+        """``keep`` skips destroy and records the sandbox id."""
         factory = FakeFactory()
         with tempfile.TemporaryDirectory() as raw:
             report = self._run(_task("hello"), factory, Path(raw), keep=True)
@@ -61,6 +70,7 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(report.sandbox_id, "sbx-test")
 
     def test_coding_cli_requires_a_key_before_creating_a_sandbox(self) -> None:
+        """A missing provider key fails before any sandbox is created."""
         factory = FakeFactory()
         with tempfile.TemporaryDirectory() as raw:
             with self.assertRaises(HarnessError):
@@ -68,6 +78,7 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(factory.opened, 0)
 
     def test_coding_cli_forwards_only_the_provider_env(self) -> None:
+        """Only the provider env is injected, and secrets stay out of the report."""
         factory = FakeFactory()
         environ = {
             "ANTHROPIC_API_KEY": "secret-key",
@@ -87,18 +98,24 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(plan.install, ("npm i -g @anthropic-ai/claude-code@latest",))
 
     def test_create_failure_is_reported(self) -> None:
+        """A factory error becomes an error report and no sandbox id."""
+
         class Boom:
+            """Factory that fails before a session exists."""
+
             async def open(self, task, env):
+                """Refuse to create a sandbox."""
                 del task, env
-                raise RuntimeError("server spento")
+                raise RuntimeError("server down")
 
         with tempfile.TemporaryDirectory() as raw:
             report = self._run(_task("hello"), Boom(), Path(raw))
         self.assertEqual(report.status, "error")
-        self.assertIn("server spento", report.error or "")
+        self.assertIn("server down", report.error or "")
         self.assertIsNone(report.sandbox_id)
 
     def test_execution_mapping_uses_error_exit_code(self) -> None:
+        """An execution error supplies the exit code when the top-level field is empty."""
         execution = SimpleNamespace(
             logs=SimpleNamespace(
                 stdout=[SimpleNamespace(text="out")],
@@ -113,6 +130,7 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(result.error, "CommandExecError: failed")
 
     def test_create_kwargs_carry_limits_and_metadata(self) -> None:
+        """Create kwargs include resource limits, metadata, and the sandbox TTL."""
         kwargs = build_create_kwargs(_task("hello"), {})
         self.assertEqual(kwargs["resource"], {"cpu": "1", "memory": "512Mi"})
         self.assertEqual(kwargs["metadata"]["task"], "hello")
@@ -120,6 +138,7 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(kwargs["timeout"].total_seconds(), 600)
 
     def test_settings_from_the_environment(self) -> None:
+        """An empty API key is dropped and the proxy flag accepts false."""
         settings = load_settings(
             {
                 "SANDBOX_DOMAIN": "127.0.0.1:8080",
@@ -132,6 +151,7 @@ class HarnessTest(unittest.TestCase):
         self.assertFalse(settings.use_server_proxy)
 
     def _run(self, task, factory, report_dir: Path, keep: bool = False, environ: dict | None = None):
+        """Run one task to completion on a fresh event loop."""
         import asyncio
 
         return asyncio.run(

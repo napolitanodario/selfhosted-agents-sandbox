@@ -1,6 +1,6 @@
 id: hello
-title: Saluto dalla sandbox
-description: Smoke test dell'harness. Esegue un programma Python già presente nel workspace.
+title: Greeting from the sandbox
+description: Smoke test of the harness. It runs a Python program already in the workspace.
 image: python:3.12
 workdir: /workspace
 timeout_minutes: 10

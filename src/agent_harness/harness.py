@@ -1,4 +1,4 @@
-"""Ciclo dell'harness: sandbox, seed, agente, verifiche, report."""
+"""Harness loop: sandbox, seed, agent, checks, report."""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ async def run_task(
     keep: bool = False,
     environ: dict[str, str] | None = None,
 ) -> RunReport:
+    """Run one task in a new sandbox and write a JSON report."""
     plan = resolve_plan(task, environ if environ is not None else {})
     ensure_plan(plan)
     _check_timeouts(task)
@@ -41,7 +42,7 @@ async def run_task(
     status = "error"
 
     try:
-        print(f"==> {task.id}: creo la sandbox ({task.image})", flush=True)
+        print(f"==> {task.id}: creating sandbox ({task.image})", flush=True)
         session = await factory.open(task, plan.env)
         print(f"    sandbox {session.id}", flush=True)
         await _seed(session, task)
@@ -55,7 +56,7 @@ async def run_task(
             )
             steps.append(_step("install", f"install-{index}", result))
             if result.exit_code != 0:
-                raise HarnessError(f"installazione dell'agente fallita ({result.exit_code})")
+                raise HarnessError(f"agent install failed ({result.exit_code})")
         for index, command in enumerate(plan.commands, start=1):
             result = await _run_command(
                 session,
@@ -83,20 +84,20 @@ async def run_task(
     except Exception as exc:
         error = str(exc)
         status = "error"
-        print(f"errore: {error}", file=sys.stderr, flush=True)
+        print(f"error: {error}", file=sys.stderr, flush=True)
     finally:
         if session is not None and not keep:
             try:
                 await session.destroy()
-                print(f"    sandbox {session.id} distrutta", flush=True)
+                print(f"    sandbox {session.id} destroyed", flush=True)
             except Exception as exc:
-                message = f"distruzione della sandbox fallita: {exc}"
-                print(f"avviso: {message}", file=sys.stderr, flush=True)
+                message = f"failed to destroy sandbox: {exc}"
+                print(f"warning: {message}", file=sys.stderr, flush=True)
                 if error is None:
                     error = message
                     status = "error"
         elif session is not None and keep:
-            print(f"    sandbox {session.id} lasciata attiva (--keep)", flush=True)
+            print(f"    sandbox {session.id} left running (--keep)", flush=True)
 
     finished = datetime.now(timezone.utc)
     report = RunReport(
@@ -118,14 +119,16 @@ async def run_task(
 
 
 def _check_timeouts(task: Task) -> None:
+    """Reject a command timeout that is longer than the sandbox lifetime."""
     budget = task.timeout_minutes * 60
     if task.command_timeout_seconds > budget:
         raise HarnessError(
-            f"{task.id}: command_timeout_seconds supera timeout_minutes della sandbox"
+            f"{task.id}: command_timeout_seconds exceeds the sandbox timeout_minutes"
         )
 
 
 async def _seed(session: SandboxSession, task: Task) -> None:
+    """Create the workdir and write workspace files plus the harness prompt."""
     prompt = task.prompt or task.description or task.title
     files = list(task.files)
     files.append((".harness/prompt.md", prompt + "\n"))
@@ -151,7 +154,9 @@ async def _seed(session: SandboxSession, task: Task) -> None:
         label="seed",
     )
     if created.exit_code != 0:
-        raise HarnessError(f"creazione delle directory fallita: {created.stderr or created.error}")
+        raise HarnessError(
+            f"failed to create directories: {created.stderr or created.error}"
+        )
     for relative, content in files:
         await session.write_text(f"{workdir}/{relative}", content)
 
@@ -164,6 +169,7 @@ async def _run_command(
     timeout: timedelta | None,
     label: str,
 ) -> CommandResult:
+    """Print a command, run it, and print output that was not already streamed."""
     print(f"\n$ [{label}] {command}", flush=True)
     result = await session.run(command, cwd=cwd, timeout=timeout)
     if not result.streamed:
@@ -178,10 +184,12 @@ async def _run_command(
 
 
 def _timeout(task: Task, override: int | None) -> timedelta:
+    """Return the check timeout when set, otherwise the task command timeout."""
     return timedelta(seconds=override or task.command_timeout_seconds)
 
 
 def _step(phase: str, name: str, result: CommandResult) -> StepRecord:
+    """Copy a command result into a report step."""
     return StepRecord(
         phase=phase,
         name=name,
@@ -194,11 +202,12 @@ def _step(phase: str, name: str, result: CommandResult) -> StepRecord:
 
 
 def _check_record(check: Check, result: CommandResult) -> CheckRecord:
+    """Compare a command result with the exit code and stdout the check expects."""
     reasons: list[str] = []
     if result.exit_code != check.expect_exit_code:
-        reasons.append(f"exit {result.exit_code}, atteso {check.expect_exit_code}")
+        reasons.append(f"exit {result.exit_code}, expected {check.expect_exit_code}")
     if check.expect_stdout_contains and check.expect_stdout_contains not in result.stdout:
-        reasons.append(f"stdout senza {check.expect_stdout_contains!r}")
+        reasons.append(f"stdout missing {check.expect_stdout_contains!r}")
     passed = not reasons
     detail = "ok" if passed else "; ".join(reasons)
     return CheckRecord(
@@ -213,6 +222,7 @@ def _check_record(check: Check, result: CommandResult) -> CheckRecord:
 
 
 def _status(task: Task, steps: list[StepRecord], checks: list[CheckRecord]) -> str:
+    """Return passed or failed. Checks decide when present, otherwise agent exits."""
     if task.checks:
         return "passed" if checks and all(item.passed for item in checks) else "failed"
     agent_steps = [step for step in steps if step.phase == "agent"]
@@ -222,6 +232,7 @@ def _status(task: Task, steps: list[StepRecord], checks: list[CheckRecord]) -> s
 
 
 def _write_report(report: RunReport, report_dir: Path) -> Path:
+    """Write the report JSON under ``report_dir`` and return its path."""
     stamp = report.started_at.strftime("%Y%m%dT%H%M%SZ")
     path = report_dir / f"{stamp}-{report.task_id}" / "report.json"
     path.parent.mkdir(parents=True, exist_ok=True)
