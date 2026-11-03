@@ -15,14 +15,15 @@ class FakeSession:
         """Store an optional command handler. The default result exits 0."""
         self.id = "sbx-test"
         self.files: dict[str, str] = {}
+        self.modes: dict[str, int] = {}
         self.commands: list[tuple[str, str]] = []
         self.destroyed = False
         self.handler = handler
 
     async def write_text(self, path: str, data: str, mode: int = 644) -> None:
         """Remember a file write."""
-        del mode
         self.files[path] = data
+        self.modes[path] = mode
 
     async def run(
         self,

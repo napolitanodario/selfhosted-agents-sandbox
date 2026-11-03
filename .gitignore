@@ -11,3 +11,4 @@ dist/
 build/
 runs/
 .python-version
+secrets/

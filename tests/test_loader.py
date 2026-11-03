@@ -18,7 +18,10 @@ class LoaderTest(unittest.TestCase):
     def test_discover_sample_tasks(self) -> None:
         """The three sample tasks load with the expected agent and files."""
         tasks = {task.id: task for task in discover_tasks(TASKS)}
-        self.assertEqual(set(tasks), {"hello", "fix-fizzbuzz", "scripted-fix"})
+        self.assertEqual(
+            set(tasks),
+            {"hello", "fix-fizzbuzz", "scripted-fix", "codex-fizzbuzz"},
+        )
 
         hello = tasks["hello"]
         self.assertEqual(hello.image, "python:3.12")

@@ -1,0 +1,22 @@
+id: codex-fizzbuzz
+title: Fix fizzbuzz with Codex
+description: Same workspace as fix-fizzbuzz, solved by Codex using the ChatGPT login.
+image: opensandbox/code-interpreter:v1.1.0
+workdir: /workspace
+workspace: ../fix-fizzbuzz/workspace
+timeout_minutes: 20
+ready_timeout_seconds: 180
+command_timeout_seconds: 600
+resources:
+  cpu: "1"
+  memory: 1Gi
+agent:
+  kind: coding-cli
+  provider: codex
+prompt: |
+  fizzbuzz.py always returns the decimal representation of the number.
+  Fix it so test_fizzbuzz.py passes under `python -m unittest`.
+  Do not modify the tests.
+checks:
+  - name: unit
+    command: python -m unittest test_fizzbuzz.py

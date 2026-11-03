@@ -58,7 +58,7 @@ class Task:
 
 @dataclass(frozen=True)
 class AgentPlan:
-    """Concrete commands to run in the sandbox and the env vars to inject."""
+    """Concrete commands to run in the sandbox, plus env and an optional login file."""
 
     kind: str
     provider: str | None
@@ -67,6 +67,7 @@ class AgentPlan:
     env: dict[str, str]
     missing: tuple[str, ...]
     stop_on_failure: bool
+    auth_file: str | None = None
 
 
 @dataclass

@@ -101,15 +101,17 @@ Checks accept `expect_exit_code` (default `0`) and `expect_stdout_contains`. Wit
 
 `coding-cli` installs a CLI in the container and passes it the prompt.
 
-| `provider` | Install | Required variables |
+| `provider` | Install | Credentials |
 | --- | --- | --- |
 | `claude` | `npm i -g @anthropic-ai/claude-code@latest` | `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` |
-| `codex` | `npm i -g @openai/codex@latest` | `OPENAI_API_KEY` |
+| `codex` | `npm i -g @openai/codex@latest` | ChatGPT login in `secrets/codex/auth.json` |
 | `custom` | `agent.install`, when set | `agent.required_env` |
 
 The coding-agent task in this repo uses `opensandbox/code-interpreter:v1.1.0` because that image includes Node.js. A `python` image is not enough for Claude or Codex.
 
 Claude is started with `--dangerously-skip-permissions` and Codex with `--ask-for-approval never`, so a run does not wait for a person. Isolation stays with the OpenSandbox sandbox, not with the CLI's own sandbox. Codex uses `--sandbox workspace-write` rather than bypassing its sandbox entirely.
+
+Codex uses the ChatGPT subscription login, not an API key. Sign in once on this machine with `codex login`. At the start of each Codex run the harness copies `~/.codex/auth.json` to `secrets/codex/auth.json`. That directory is gitignored. The harness then checks that the file is a ChatGPT login with a refresh token, removes any `OPENAI_API_KEY` field, and writes it to `~/.codex/auth.json` inside the sandbox. Leave `OPENAI_API_KEY` unset in the environment. When that variable is set, Codex bills the API account instead of the ChatGPT plan. `agent-harness run codex-fizzbuzz` is the sample task. Set `CODEX_AUTH_FILE` only when the login file should come from a path other than `~/.codex/auth.json`.
 
 `agent.command` replaces the default command. The `{prompt_file}` placeholder becomes the prompt path inside the sandbox. `agent.install: []` skips the default install. `agent.env` lists extra host variables to copy. Empty values are not forwarded.
 
@@ -135,6 +137,7 @@ To add an agent that is not a CLI, extend `resolve_plan` in `src/agent_harness/a
 ```text
 src/agent_harness/    loader, agents, OpenSandbox session, harness loop, CLI
 tasks/                one task per directory
+secrets/codex/        ChatGPT Codex login, ignored by git
 tests/                loader and harness tests, with a fake sandbox
 runs/                 local reports, ignored by git
 ```
@@ -147,6 +150,6 @@ PYTHONPATH=src python -m unittest discover -s tests
 
 ## Operations
 
-Keys stay in the host environment. The harness injects them into the container only for the task provider and does not write them into the report. Do not mount the host home directory into the sandbox. Agent commands are untrusted code, and the container is the boundary.
+API keys stay in the host environment. The harness injects them into the container only for the task provider and does not write them into the report. The Codex login file is the exception: it is copied into the sandbox home so Codex can use the ChatGPT plan. Do not commit it. Agent commands are untrusted code, and the container is the boundary.
 
 Stop the OpenSandbox server when it is not needed. `--keep` and a long timeout leave containers running until the TTL or an explicit destroy.

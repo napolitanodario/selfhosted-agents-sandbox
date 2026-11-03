@@ -8,7 +8,13 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 
-from agent_harness.agents import ensure_plan, resolve_plan
+from agent_harness.agents import (
+    ensure_plan,
+    project_root_for,
+    read_chatgpt_auth,
+    resolve_plan,
+    sync_host_codex_auth,
+)
 from agent_harness.models import (
     Check,
     CheckRecord,
@@ -30,7 +36,17 @@ async def run_task(
     environ: dict[str, str] | None = None,
 ) -> RunReport:
     """Run one task in a new sandbox and write a JSON report."""
-    plan = resolve_plan(task, environ if environ is not None else {})
+    active_env = dict(environ or {})
+    if task.agent.provider == "codex" and active_env.get("OPENAI_API_KEY"):
+        raise HarnessError(
+            "Unset OPENAI_API_KEY to use the ChatGPT login. "
+            "Codex bills the API account when that variable is set."
+        )
+    if task.agent.provider == "codex" and not active_env.get("CODEX_AUTH_FILE"):
+        copied = sync_host_codex_auth(project_root_for(task))
+        active_env["CODEX_AUTH_FILE"] = str(copied)
+        print(f"==> copied Codex login to {copied}", flush=True)
+    plan = resolve_plan(task, active_env)
     ensure_plan(plan)
     _check_timeouts(task)
 
@@ -46,6 +62,8 @@ async def run_task(
         session = await factory.open(task, plan.env)
         print(f"    sandbox {session.id}", flush=True)
         await _seed(session, task)
+        if plan.auth_file is not None:
+            await _install_chatgpt_login(session, Path(plan.auth_file))
         for index, command in enumerate(plan.install, start=1):
             result = await _run_command(
                 session,
@@ -159,6 +177,37 @@ async def _seed(session: SandboxSession, task: Task) -> None:
         )
     for relative, content in files:
         await session.write_text(f"{workdir}/{relative}", content)
+
+
+async def _install_chatgpt_login(session: SandboxSession, auth_path: Path) -> None:
+    """Write the ChatGPT Codex login into the sandbox home, outside the workspace."""
+    payload = read_chatgpt_auth(auth_path)
+    home_result = await _run_command(
+        session,
+        'printf %s "$HOME"',
+        cwd="/",
+        timeout=timedelta(seconds=30),
+        label="codex-home",
+    )
+    home = home_result.stdout.strip()
+    if home_result.exit_code != 0 or not home.startswith("/"):
+        raise HarnessError("could not resolve the sandbox home directory")
+    codex_dir = f"{home}/.codex"
+    created = await _run_command(
+        session,
+        f"mkdir -p {shlex.quote(codex_dir)} && chmod 700 {shlex.quote(codex_dir)}",
+        cwd="/",
+        timeout=timedelta(seconds=30),
+        label="codex-auth",
+    )
+    if created.exit_code != 0:
+        raise HarnessError("could not create the Codex login directory in the sandbox")
+    await session.write_text(f"{codex_dir}/auth.json", payload, mode=0o600)
+    await session.write_text(
+        f"{codex_dir}/config.toml",
+        'cli_auth_credentials_store = "file"\n',
+        mode=0o600,
+    )
 
 
 async def _run_command(

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from agent_harness.agents import resolve_plan
+from agent_harness.agents import resolve_plan, sync_host_codex_auth
 from agent_harness.harness import run_task
 from agent_harness.loader import load_task
 from agent_harness.models import CommandResult, HarnessError
@@ -96,6 +96,85 @@ class HarnessTest(unittest.TestCase):
         self.assertIn("--dangerously-skip-permissions", plan.commands[0])
         self.assertIn("/workspace/.harness/prompt.md", plan.commands[0])
         self.assertEqual(plan.install, ("npm i -g @anthropic-ai/claude-code@latest",))
+
+    def test_codex_copies_the_chatgpt_login_and_drops_the_api_key(self) -> None:
+        """A ChatGPT login is written outside the workspace and kept out of the report."""
+
+        def handler(command: str) -> CommandResult:
+            if "printf" in command:
+                return CommandResult(command=command, exit_code=0, stdout="/root", stderr="")
+            return CommandResult(command=command, exit_code=0, stdout="", stderr="")
+
+        factory = FakeFactory(FakeSession(handler))
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            auth = root / "auth.json"
+            auth.write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "chatgpt",
+                        "OPENAI_API_KEY": "sk-secret",
+                        "tokens": {"refresh_token": "refresh-secret"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            report = self._run(
+                _task("codex-fizzbuzz"),
+                factory,
+                root / "runs",
+                environ={"CODEX_AUTH_FILE": str(auth)},
+            )
+            report_text = Path(report.report_path).read_text(encoding="utf-8")
+        written = json.loads(factory.session.files["/root/.codex/auth.json"])
+        self.assertEqual(written["auth_mode"], "chatgpt")
+        self.assertEqual(written["tokens"]["refresh_token"], "refresh-secret")
+        self.assertNotIn("OPENAI_API_KEY", written)
+        self.assertEqual(factory.session.modes["/root/.codex/auth.json"], 0o600)
+        self.assertIn('cli_auth_credentials_store = "file"', factory.session.files["/root/.codex/config.toml"])
+        self.assertNotIn("refresh-secret", report_text)
+        self.assertNotIn("sk-secret", report_text)
+        self.assertNotIn("OPENAI_API_KEY", factory.env)
+
+    def test_codex_refuses_to_start_when_the_api_key_is_set(self) -> None:
+        """A set API key is rejected before a sandbox exists."""
+        factory = FakeFactory()
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaises(HarnessError) as caught:
+                self._run(
+                    _task("codex-fizzbuzz"),
+                    factory,
+                    Path(raw),
+                    environ={"OPENAI_API_KEY": "sk-secret"},
+                )
+        self.assertIn("Unset OPENAI_API_KEY", str(caught.exception))
+        self.assertEqual(factory.opened, 0)
+
+    def test_sync_copies_the_host_login_into_the_project(self) -> None:
+        """The startup copy lands in secrets/codex and is not world-readable."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source = root / "home-auth.json"
+            source.write_text('{"auth_mode":"chatgpt"}\n', encoding="utf-8")
+            project = root / "project"
+            project.mkdir()
+            copied = sync_host_codex_auth(project, source)
+            self.assertEqual(copied, project / "secrets" / "codex" / "auth.json")
+            self.assertEqual(copied.read_text(encoding="utf-8"), source.read_text(encoding="utf-8"))
+            self.assertEqual(copied.stat().st_mode & 0o777, 0o600)
+
+    def test_codex_refuses_a_missing_login_file(self) -> None:
+        """A missing ChatGPT login fails before a sandbox exists."""
+        factory = FakeFactory()
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaises(HarnessError):
+                self._run(
+                    _task("codex-fizzbuzz"),
+                    factory,
+                    Path(raw),
+                    environ={"CODEX_AUTH_FILE": str(Path(raw) / "missing.json")},
+                )
+        self.assertEqual(factory.opened, 0)
 
     def test_create_failure_is_reported(self) -> None:
         """A factory error becomes an error report and no sandbox id."""
