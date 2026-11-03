@@ -11,7 +11,12 @@ from agent_harness.agents import resolve_plan, sync_host_codex_auth
 from agent_harness.harness import run_task
 from agent_harness.loader import load_task
 from agent_harness.models import CommandResult, HarnessError
-from agent_harness.session import build_create_kwargs, execution_to_result, load_settings
+from agent_harness.session import (
+    apply_env_file,
+    build_create_kwargs,
+    execution_to_result,
+    load_settings,
+)
 
 from support import FakeFactory, FakeSession
 
@@ -215,6 +220,27 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(kwargs["metadata"]["task"], "hello")
         self.assertNotIn("env", kwargs)
         self.assertEqual(kwargs["timeout"].total_seconds(), 600)
+
+    def test_env_file_fills_missing_keys_only(self) -> None:
+        """A project .env supplies keys the shell did not already set."""
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / ".env"
+            path.write_text(
+                '\n'.join(
+                    [
+                        "# comment",
+                        "SANDBOX_API_KEY=from-file",
+                        "SANDBOX_DOMAIN=from-file",
+                        "export SANDBOX_PROTOCOL='http'",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            environ = {"SANDBOX_DOMAIN": "from-shell"}
+            apply_env_file(path, environ)
+        self.assertEqual(environ["SANDBOX_API_KEY"], "from-file")
+        self.assertEqual(environ["SANDBOX_DOMAIN"], "from-shell")
+        self.assertEqual(environ["SANDBOX_PROTOCOL"], "http")
 
     def test_settings_from_the_environment(self) -> None:
         """An empty API key is dropped and the proxy flag accepts false."""

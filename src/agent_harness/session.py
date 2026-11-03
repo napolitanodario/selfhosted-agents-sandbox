@@ -7,9 +7,11 @@ the server.
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from datetime import timedelta
+from pathlib import Path
 from typing import Protocol
 
 from agent_harness.models import CommandResult, Task
@@ -52,6 +54,59 @@ class SandboxFactory(Protocol):
 
     async def open(self, task: Task, env: dict[str, str]) -> SandboxSession:
         """Create a sandbox for ``task`` with ``env`` injected into the container."""
+
+
+def load_project_env() -> None:
+    """Load the project ``.env`` into the process environment.
+
+    Variables already set in the shell stay as they are. The file is found by
+    walking up from the working directory and from this package until a
+    ``pyproject.toml`` appears.
+    """
+    root = _project_root()
+    if root is None:
+        return
+    path = root / ".env"
+    if path.is_file():
+        apply_env_file(path, os.environ)
+
+
+def apply_env_file(path: Path, environ: dict[str, str]) -> None:
+    """Set keys that are missing from ``environ`` using assignments in ``path``."""
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or key in environ:
+            continue
+        environ[key] = _unquote(value.strip())
+
+
+def _project_root() -> Path | None:
+    """Return the directory that contains ``pyproject.toml``, if one is found."""
+    starts = [Path.cwd(), Path(__file__).resolve()]
+    seen: set[Path] = set()
+    for start in starts:
+        for candidate in [start, *start.parents]:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if (candidate / "pyproject.toml").is_file():
+                return candidate
+    return None
+
+
+def _unquote(value: str) -> str:
+    """Remove one matching pair of single or double quotes around a value."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
 
 
 def load_settings(environ: dict[str, str]) -> Settings:

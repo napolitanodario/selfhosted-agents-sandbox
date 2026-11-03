@@ -12,11 +12,12 @@ from agent_harness import __version__
 from agent_harness.harness import run_task
 from agent_harness.loader import discover_tasks, load_task
 from agent_harness.models import HarnessError, Task
-from agent_harness.session import OpenSandboxFactory, load_settings
+from agent_harness.session import OpenSandboxFactory, load_project_env, load_settings
 
 
 def main(argv: list[str] | None = None) -> int:
     """Parse arguments and run list, validate, or run. Return a process exit code."""
+    load_project_env()
     parser = _parser()
     args = parser.parse_args(argv)
     try:

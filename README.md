@@ -37,15 +37,7 @@ pip install -e .
 cp .env.example .env
 ```
 
-Load the variables before a real run:
-
-```bash
-set -a
-source .env
-set +a
-```
-
-`SANDBOX_API_KEY` is needed only when the local server has authentication enabled. `SANDBOX_USE_SERVER_PROXY=true` routes commands and files through the server. That is the OpenSandbox quick start setting for a client that cannot reach container addresses.
+`agent-harness` loads `.env` from the project root when it starts. A variable already exported in the shell is left unchanged. `SANDBOX_API_KEY` is needed only when the local server has authentication enabled. `SANDBOX_USE_SERVER_PROXY=true` routes commands and files through the server. That is the OpenSandbox quick start setting for a client that cannot reach container addresses.
 
 ## Commands
 
