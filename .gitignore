@@ -10,5 +10,7 @@ __pycache__/
 dist/
 build/
 runs/
+.experiments/
+orchestrator.local.yaml
 .python-version
 secrets/

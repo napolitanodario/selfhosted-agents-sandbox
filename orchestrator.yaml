@@ -1,0 +1,23 @@
+version: 1
+state_dir: .experiments
+policy:
+  max_active_runs: 4
+  max_attempts: 2
+  artifact_limit_bytes: 1073741824
+
+profiles:
+  # The default smoke workload runs in a container on this Linux/WSL machine.
+  cpu:
+    backend: docker
+    image: python:3.12-slim
+    cpus: 1
+    memory: 512m
+    timeout_seconds: 60
+  # Explicitly trusted development fallback: no container or security isolation.
+  cpu-dev:
+    backend: local-process
+    trusted_local: true
+    timeout_seconds: 60
+
+repositories: {}
+workloads: {}

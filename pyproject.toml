@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "selfhosted-agents-sandbox"
-version = "0.1.0"
-description = "Local harness for programming tasks in an OpenSandbox sandbox."
+version = "0.2.0"
+description = "Durable experiment orchestration with sandboxed agents and pluggable workload and execution adapters."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -30,6 +30,7 @@ Repository = "https://github.com/napolitanodario/selfhosted-agents-sandbox"
 
 [project.scripts]
 agent-harness = "agent_harness.cli:main"
+experimentctl = "experiment_orchestrator.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

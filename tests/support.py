@@ -25,6 +25,13 @@ class FakeSession:
         self.files[path] = data
         self.modes[path] = mode
 
+    async def read_text(self, path: str, max_bytes: int = 1024 * 1024) -> str:
+        assert not self.destroyed, "exports must happen before teardown"
+        content = self.files[path]
+        if len(content.encode()) > max_bytes:
+            raise ValueError("output too large")
+        return content
+
     async def run(
         self,
         command: str,

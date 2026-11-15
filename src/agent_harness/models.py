@@ -124,6 +124,7 @@ class RunReport:
     checks: list[CheckRecord] = field(default_factory=list)
     error: str | None = None
     report_path: str | None = None
+    artifacts: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Return a JSON-ready copy with timestamps as ISO strings."""

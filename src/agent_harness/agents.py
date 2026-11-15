@@ -45,7 +45,7 @@ def _codex_command(prompt_file: str) -> str:
     """Build the headless Codex command for a prompt file in the sandbox."""
     quoted = shlex.quote(prompt_file)
     return (
-        "codex exec --json --sandbox workspace-write --ask-for-approval never "
+        "codex --ask-for-approval never exec --json --sandbox workspace-write "
         f'--skip-git-repo-check "$(cat {quoted})"'
     )
 

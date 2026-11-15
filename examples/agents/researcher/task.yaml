@@ -1,0 +1,17 @@
+id: researcher
+title: Experiment research agent
+description: One bounded role in a durable experiment campaign.
+image: opensandbox/code-interpreter:v1.1.0
+workdir: /workspace
+timeout_minutes: 45
+command_timeout_seconds: 1200
+resources:
+  cpu: '2'
+  memory: 2Gi
+agent:
+  kind: coding-cli
+  provider: codex
+  # Pin the CLI used for these campaign sessions.
+  install:
+    - npm i -g @openai/codex@0.163.0
+checks: []

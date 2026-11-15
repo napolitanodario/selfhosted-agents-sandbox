@@ -1,0 +1,9 @@
+version: 1
+experiment_id: dedupe-exact
+adapter: cpu-dedupe
+profile: cpu
+hypothesis: Exact matching preserves case-distinct strings.
+payload:
+  texts: [Alpha, alpha, Beta, Beta]
+  case_sensitive: true
+  expected_unique: 3

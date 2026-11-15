@@ -1,0 +1,18 @@
+version: 1
+objective: Verify the entire orchestration workflow without calling a model.
+rubric: Compare the observed unique counts on the same input texts.
+max_runs: 2
+baseline:
+  version: 1
+  experiment_id: scripted-dedupe-baseline
+  adapter: cpu-dedupe
+  profile: cpu
+  payload:
+    texts: [Alpha, alpha, Beta, Beta]
+    case_sensitive: true
+    expected_unique: 3
+agents:
+  proposer: ../agents/scripted-researcher/task.yaml
+  reviewer: ../agents/scripted-researcher/task.yaml
+  evaluator: ../agents/scripted-researcher/task.yaml
+  analyst: ../agents/scripted-researcher/task.yaml

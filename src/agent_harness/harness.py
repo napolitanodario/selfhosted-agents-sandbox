@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shlex
 import sys
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 
@@ -34,6 +35,8 @@ async def run_task(
     report_dir: Path,
     keep: bool = False,
     environ: dict[str, str] | None = None,
+    exports: tuple[str, ...] = (),
+    artifact_dir: Path | None = None,
 ) -> RunReport:
     """Run one task in a new sandbox and write a JSON report."""
     active_env = dict(environ or {})
@@ -49,6 +52,12 @@ async def run_task(
     plan = resolve_plan(task, active_env)
     ensure_plan(plan)
     _check_timeouts(task)
+    for relative in exports:
+        path = PurePosixPath(relative)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise HarnessError(f"invalid export path: {relative}")
+    if exports and artifact_dir is None:
+        raise HarnessError("artifact_dir is required when exporting outputs")
 
     started = datetime.now(timezone.utc)
     session: SandboxSession | None = None
@@ -56,6 +65,7 @@ async def run_task(
     checks: list[CheckRecord] = []
     error: str | None = None
     status = "error"
+    artifacts: dict[str, str] = {}
 
     try:
         print(f"==> {task.id}: creating sandbox ({task.image})", flush=True)
@@ -104,6 +114,19 @@ async def run_task(
         status = "error"
         print(f"error: {error}", file=sys.stderr, flush=True)
     finally:
+        if session is not None and artifact_dir is not None:
+            for relative in exports:
+                try:
+                    content = await session.read_text(f"{task.workdir.rstrip('/')}/{relative}")
+                    destination = artifact_dir / relative
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    temporary = destination.with_suffix(destination.suffix + ".tmp")
+                    temporary.write_text(content, encoding="utf-8")
+                    temporary.replace(destination)
+                    artifacts[relative] = str(destination)
+                except Exception as exc:
+                    error = f"failed to export {relative}: {exc}"
+                    status = "error"
         if session is not None and not keep:
             try:
                 await session.destroy()
@@ -130,6 +153,7 @@ async def run_task(
         steps=steps,
         checks=checks,
         error=error,
+        artifacts=artifacts,
     )
     report.report_path = str(_write_report(report, report_dir))
     print(f"[{status}] report {report.report_path}", flush=True)
@@ -282,8 +306,9 @@ def _status(task: Task, steps: list[StepRecord], checks: list[CheckRecord]) -> s
 
 def _write_report(report: RunReport, report_dir: Path) -> Path:
     """Write the report JSON under ``report_dir`` and return its path."""
-    stamp = report.started_at.strftime("%Y%m%dT%H%M%SZ")
+    stamp = report.started_at.strftime("%Y%m%dT%H%M%S%fZ") + "-" + uuid.uuid4().hex[:8]
     path = report_dir / f"{stamp}-{report.task_id}" / "report.json"
     path.parent.mkdir(parents=True, exist_ok=True)
+    report.report_path = str(path)
     path.write_text(json.dumps(report.to_dict(), indent=2) + "\n", encoding="utf-8")
     return path

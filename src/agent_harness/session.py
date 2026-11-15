@@ -36,6 +36,9 @@ class SandboxSession(Protocol):
     async def write_text(self, path: str, data: str, mode: int = 644) -> None:
         """Write a text file at an absolute path inside the sandbox."""
 
+    async def read_text(self, path: str, max_bytes: int = 1024 * 1024) -> str:
+        """Read a bounded output file before destroying the sandbox."""
+
     async def run(
         self,
         command: str,
@@ -191,6 +194,12 @@ class OpenSandboxSession:
         await self._sandbox.files.write_files(
             [WriteEntry(path=path, data=data, mode=mode)]
         )
+
+    async def read_text(self, path: str, max_bytes: int = 1024 * 1024) -> str:
+        text = await self._sandbox.files.read_file(path, offset=0, limit=max_bytes + 1)
+        if len(text.encode("utf-8")) > max_bytes:
+            raise ValueError(f"sandbox output exceeds {max_bytes} bytes: {path}")
+        return text
 
     async def run(
         self,

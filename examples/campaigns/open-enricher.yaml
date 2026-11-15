@@ -1,0 +1,26 @@
+version: 1
+objective: Compare the 300-second baseline with a 600-second window, keeping memory, stage flags, code and video cohort fixed.
+rubric: Compare fidelity and overall native scores, inference duration and peak VRAM for each video. Report missing data and failures explicitly. Do not infer quality from execution success alone.
+max_runs: 2
+baseline:
+  version: 1
+  experiment_id: memory-2-window-300
+  adapter: open-enricher
+  profile: gpu
+  source:
+    repository: open-enricher
+    revision: 9413458dc4b06713504a6a31568753af15a4f8a2
+  payload:
+    videos: [replace-with-real-video.mp4]
+    variant:
+      experiment_id: agent-memory-2-window-300
+      title: Two memory scenes, 300-second window
+      interval_seconds: 300
+      vlm_memory_scenes: 2
+      visual_only: false
+      narrate_from_visual: false
+agents:
+  proposer: ../agents/researcher/task.yaml
+  reviewer: ../agents/researcher/task.yaml
+  evaluator: ../agents/researcher/task.yaml
+  analyst: ../agents/researcher/task.yaml

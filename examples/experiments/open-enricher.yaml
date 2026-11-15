@@ -1,0 +1,20 @@
+version: 1
+experiment_id: memory-2-window-300
+adapter: open-enricher
+profile: gpu
+# Replace with an available commit from your independent Open-Enricher checkout.
+source:
+  repository: open-enricher
+  revision: 9413458dc4b06713504a6a31568753af15a4f8a2
+hypothesis: Baseline with two memory scenes and a 300-second window.
+# Optional inputs: [{ref: video.mp4, sha256: <64 hex characters>}].
+# Without expected digests the worker records observed SHA-256 values before inference.
+payload:
+  videos: [replace-with-real-video.mp4]
+  variant:
+    experiment_id: agent-memory-2-window-300
+    title: Two memory scenes, 300-second window
+    interval_seconds: 300
+    vlm_memory_scenes: 2
+    visual_only: false
+    narrate_from_visual: false

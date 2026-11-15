@@ -1,0 +1,9 @@
+version: 1
+experiment_id: dedupe-casefold
+adapter: cpu-dedupe
+profile: cpu-dev
+hypothesis: Case folding removes a duplicate missed by exact matching.
+payload:
+  texts: [Alpha, alpha, Beta, Beta]
+  case_sensitive: false
+  expected_unique: 2

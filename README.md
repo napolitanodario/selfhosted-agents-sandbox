@@ -1,147 +1,138 @@
-# Self-hosted agents sandbox
+# Experiment orchestrator
 
-Local harness for programming tasks inside [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox). Each task starts in an isolated container: the harness copies the workspace, starts an agent, runs the checks, and destroys the sandbox.
+A local control plane for experiments that run for hours or days on another machine. Sandboxed agents propose and review changes; a deterministic broker submits jobs, records their identity, collects evidence, and starts evaluation when results arrive.
 
-This repository is a skeleton. The `scripted` agent is enough to exercise the loop without API keys. The `coding-cli` agent starts Claude Code or Codex inside the sandbox.
+**Open-Enricher stays independent and standalone.** A workload adapter integrates it without changing its repository. The same broker runs a CPU deduplication example and operator-configured command workloads.
 
-## Run loop
-
-1. Read `tasks/<id>/task.yaml` and the files in `workspace/`.
-2. Ask OpenSandbox for a container that uses the task image.
-3. Create the workdir, copy the files, and write `.harness/prompt.md`.
-4. Run the agent.
-5. Run the checks. Their result decides whether the task passed.
-6. Save `runs/<timestamp>-<id>/report.json` and destroy the sandbox.
-
-## Requirements
-
-- Docker, used by OpenSandbox for local execution
-- Python 3.11+
-- An OpenSandbox server, usually listening on `localhost:8080`
-
-## Local server
-
-```bash
-uvx opensandbox-server init-config ~/.sandbox.toml --example docker
-uvx opensandbox-server
+```mermaid
+flowchart LR
+  A[Local coordinator] --> S[OpenSandbox agent sessions]
+  S -->|JSON proposals and reviews| A
+  A --> B[Broker and SQLite ledger]
+  B --> L[Local Docker CPU jobs]
+  B -->|SSH and Slurm| G[Remote GPU or CPU jobs]
+  L --> E[Artifacts and outcomes]
+  G --> E
+  E --> A
 ```
 
-The health check answers at `http://127.0.0.1:8080/health`.
+## Quick start
 
-## Install
+Requirements: Linux/WSL, Python 3.11+ (a current patch release with tarfile extraction filters), Docker for isolated CPU workloads. OpenSandbox is needed only for agent sessions.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
-cp .env.example .env
+
+experimentctl validate examples/experiments/cpu-exact.yaml
+experimentctl submit examples/experiments/cpu-exact.yaml --request-id baseline-001
+experimentctl watch <run-id>
+experimentctl artifacts <run-id>
 ```
 
-`agent-harness` loads `.env` from the project root when it starts. A variable already exported in the shell is left unchanged. `SANDBOX_API_KEY` is needed only when the local server has authentication enabled. `SANDBOX_USE_SERVER_PROXY=true` routes commands and files through the server. That is the OpenSandbox quick start setting for a client that cannot reach container addresses.
+The CPU workload runs **on this Linux/WSL machine**, in a Docker container with no network, a read-only root filesystem and resource limits. It deduplicates texts and checks the expected count. It consumes no GPU and calls no model. The stopped container is retained; use `docker rm exp-<attempt-id>` after collection.
 
-## Commands
+Without Docker, the explicit development profile starts a detached local process:
 
 ```bash
-agent-harness list
+experimentctl submit examples/experiments/cpu-dev.yaml --request-id dev-001
+```
+
+`cpu-dev` accepts trusted workloads only: it provides separate directories, **not security isolation**. Stopping `watch` stops observation, not the job. Before installation, commands also work as `PYTHONPATH=src .venv/bin/python -m experiment_orchestrator ...`.
+
+## Job operations
+
+```bash
+experimentctl list
+experimentctl status <run-id> --refresh
+experimentctl reconcile
+experimentctl cancel <run-id>
+experimentctl retry <run-id>
+experimentctl events <run-id>
+```
+
+Reuse the same request ID after a lost submit response: it returns the same run. Changing the manifest with that key is an error. Intentional reruns use new keys; retries create separate attempts under the original run and consume its attempt budget.
+
+Scheduler, pipeline, evaluation and artifact states are separate. An `unknown` submission never authorizes another launch. Preserve the state directory and remote attempt directories. SQLite belongs on a local filesystem, not NFS.
+
+For an irrecoverable unknown state, [operator resolution](docs/architecture.md#submission-ambiguity) requires independently establishing that no original job remains active and recording that evidence. The automated coordinator never performs this override.
+
+## Remote Slurm and Open-Enricher
+
+1. Copy `examples/slurm-config.yaml` to `orchestrator.local.yaml` in this repository root.
+2. Set your SSH alias, account/partition, shared remote job directory and Python runtime paths. The job directory must be visible to login and compute nodes.
+3. Provision the workload dependencies on compute nodes. The broker ships a pinned source archive and its standard-library worker, not GPU dependencies.
+4. Test the remote `cpu` profile first.
+5. Set video filenames and the source commit in `examples/experiments/open-enricher.yaml`, then submit with the `gpu` profile.
+
+```bash
+experimentctl --config orchestrator.local.yaml submit examples/experiments/cpu-exact.yaml --request-id slurm-smoke-001
+experimentctl --config orchestrator.local.yaml submit examples/experiments/open-enricher.yaml --request-id enricher-001
+experimentctl --config orchestrator.local.yaml watch <run-id>
+```
+
+SSH uses existing host configuration and host-key verification. No SSH keys or scheduler access are forwarded to agents. The remote runtime needs its own native evaluator credentials. Inference and native evaluation currently share the same allocation.
+
+Monitoring and collection run on the **local orchestrator PC**. The Slurm backend uses an OpenSSH persistent connection for staging, submission, status checks, cancellation and downloads. Each request opens a channel on that connection; polling every 30 seconds does **not** create a new network connection every 30 seconds. No resident monitoring service is installed on the cluster, and the cluster does not need inbound access to the PC.
+
+OpenSSH retains the connection for one hour of inactivity by default. Regular checks keep it in use even for jobs lasting days. Keepalives detect an unresponsive peer; after a dropped or expired connection, a later request establishes a new one. A failed request is left for broker reconciliation rather than blindly replayed. Command deadlines and transfer deadlines are separate from the job's wall-time limit. Configure these settings in the profile's optional `ssh` mapping; see `examples/slurm-config.yaml`.
+
+`watch` and `campaign run` accept `--poll-seconds` to change the check interval. This changes how often Slurm is queried, not the connection lifetime. If the local watcher stops, the job continues remotely; restart the watcher to resume checking and collection.
+
+The Open-Enricher adapter archives the selected Git commit, modifies only that attempt's variant, invokes the standalone CLI with `--only`, `--video`, `--no-cache`, `--force`, and validates every requested video's native results and expected files. Source, outputs, caches, progress and archives are private to each attempt. Videos stay in the configured remote input directory. Slurm jobs run as your cluster user; a private directory is state isolation, not a security sandbox.
+
+## Coordinated agents
+
+Start OpenSandbox and configure provider credentials using [the harness guide](docs/agent-harness.md). A campaign supplies an objective, fixed rubric, baseline, four agent templates and a run budget.
+
+```bash
+experimentctl campaign create examples/campaigns/cpu.yaml
+experimentctl campaign run <campaign-id>
+experimentctl campaign status <campaign-id>
+experimentctl campaign resume <campaign-id>
+```
+
+`campaign step` advances one step. The sequence is baseline → propose → review → submit → wait → evaluate → analyse. Additional candidates are bounded by `max_runs`, including the baseline. A rejected review ends the campaign.
+
+Each role gets a fresh sandbox. The evaluator sees the rubric and baseline/candidate evidence without proposal/review transcripts; the analyst sees the hypothesis and earlier decisions. Responses are exported before teardown. GPU waiting invokes no agent. Saved prompts, task snapshots, responses and artifact references reconstruct context after restart; native Codex/Claude session restoration is not implemented.
+
+Use `examples/campaigns/cpu-scripted.yaml` to test all four roles in real OpenSandbox sessions without model calls or credentials. The scripted roles are deterministic fixtures, not AI agents. `examples/campaigns/open-enricher.yaml` provides the 300-versus-600-second experiment template.
+
+For Open-Enricher, replace the campaign baseline with the Open-Enricher manifest and select your `gpu` profile. Agents can change payload fields while the coordinator fixes source revision, execution profile, credentials, resource limits and input cohort.
+
+## Other workloads
+
+Register a trusted command and independent repository in operator configuration:
+
+```yaml
+repositories:
+  my-workload: ../my-workload
+workloads:
+  sum:
+    repository: my-workload
+    argv: [python3, experiment.py]
+```
+
+Use a manifest with `adapter: command`, a configured profile, `source: {repository: my-workload, revision: <full-commit-sha>}` and `payload: {workload: sum, parameters: {values: [1, 2, 3]}}`.
+
+The command reads parameters from `EXPERIMENT_INPUT`, writes evidence to `EXPERIMENT_OUTPUT` and a JSON outcome to `EXPERIMENT_RESULT`:
+
+```json
+{"pipeline":"succeeded","evaluation":"not_requested","metrics":{"sum":6}}
+```
+
+See `examples/command-workload/experiment.py`. Commands are trusted argv arrays; agents supply data, not shell fragments. Workload normalization belongs in `adapters.py`; execution belongs in `backends.py`.
+
+## Development
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests
 agent-harness validate
-agent-harness run hello
-agent-harness run scripted-fix
-agent-harness run --all
 ```
 
-`hello` and `scripted-fix` do not call a model. `fix-fizzbuzz` uses Claude Code and needs `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, plus an image that includes Node.js:
+Tests cover real detached CPU/command workers, pinned source snapshots, cancellation, bounded retries, artifacts, campaign recovery and Slurm transport with fake scheduler executables and a lost SSH reply. They need no live LLM or cluster. The original harness CLI and examples remain available.
 
-```bash
-docker pull opensandbox/code-interpreter:v1.1.0
-agent-harness run fix-fizzbuzz
-```
+An optional loopback integration test exercises the real OpenSSH client against a temporary SSH server, with isolated test keys and host verification. It checks connection reuse across requests and broker-client instances, upload/download, command timeout, reconnection after a dropped connection, and idle expiry. To run it, install `asyncssh` in a test environment and run `EXPERIMENT_TEST_REAL_SSH=1 PYTHONPATH=src python -m unittest discover -s tests -p test_ssh_live.py`. The production package does not depend on `asyncssh`.
 
-`--keep` leaves the sandbox running after the run. Reports stay in `runs/`, and that directory is not versioned.
-
-The exit code is `0` when every executed task passes, `1` when a check fails or the run errors, and `2` when the task or the configuration is invalid.
-
-## Tasks
-
-A task is a directory with `task.yaml` and, usually, `workspace/`.
-
-```yaml
-id: hello
-title: Greeting from the sandbox
-image: python:3.12
-workdir: /workspace
-timeout_minutes: 10
-command_timeout_seconds: 60
-agent:
-  kind: scripted
-  commands:
-    - python main.py
-checks:
-  - name: output
-    command: python main.py
-    expect_stdout_contains: hello
-```
-
-`command_timeout_seconds` must fit inside `timeout_minutes`. The first limits a single command. The second is the sandbox TTL. `resources` accepts OpenSandbox limits (`cpu`, `memory`) and is forwarded as given.
-
-`workspace` may point at another directory, as `scripted-fix` does with the `fix-fizzbuzz` workspace. Entries under `files` are inline text and override workspace files with the same path.
-
-Checks accept `expect_exit_code` (default `0`) and `expect_stdout_contains`. With no checks, the task passes when every agent command exits `0`.
-
-## Agents
-
-`scripted` runs `agent.commands` in the workdir. It stops at the first non-zero command and still runs the checks.
-
-`coding-cli` installs a CLI in the container and passes it the prompt.
-
-| `provider` | Install | Credentials |
-| --- | --- | --- |
-| `claude` | `npm i -g @anthropic-ai/claude-code@latest` | `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` |
-| `codex` | `npm i -g @openai/codex@latest` | ChatGPT login in `secrets/codex/auth.json` |
-| `custom` | `agent.install`, when set | `agent.required_env` |
-
-The coding-agent task in this repo uses `opensandbox/code-interpreter:v1.1.0` because that image includes Node.js. A `python` image is not enough for Claude or Codex.
-
-Claude is started with `--dangerously-skip-permissions` and Codex with `--ask-for-approval never`, so a run does not wait for a person. Isolation stays with the OpenSandbox sandbox, not with the CLI's own sandbox. Codex uses `--sandbox workspace-write` rather than bypassing its sandbox entirely.
-
-Codex uses the ChatGPT subscription login, not an API key. Sign in once on this machine with `codex login`. At the start of each Codex run the harness copies `~/.codex/auth.json` to `secrets/codex/auth.json`. That directory is gitignored. The harness then checks that the file is a ChatGPT login with a refresh token, removes any `OPENAI_API_KEY` field, and writes it to `~/.codex/auth.json` inside the sandbox. Leave `OPENAI_API_KEY` unset in the environment. When that variable is set, Codex bills the API account instead of the ChatGPT plan. `agent-harness run codex-fizzbuzz` is the sample task. Set `CODEX_AUTH_FILE` only when the login file should come from a path other than `~/.codex/auth.json`.
-
-`agent.command` replaces the default command. The `{prompt_file}` placeholder becomes the prompt path inside the sandbox. `agent.install: []` skips the default install. `agent.env` lists extra host variables to copy. Empty values are not forwarded.
-
-Custom provider example:
-
-```yaml
-agent:
-  kind: coding-cli
-  provider: custom
-  install:
-    - pip install my-agent
-  command: my-agent --prompt {prompt_file}
-  required_env:
-    - MY_AGENT_API_KEY
-  env:
-    - MY_AGENT_API_KEY
-```
-
-To add an agent that is not a CLI, extend `resolve_plan` in `src/agent_harness/agents.py`. The harness talks to the sandbox only through `SandboxSession`: `write_text`, `run`, and `destroy`.
-
-## Layout
-
-```text
-src/agent_harness/    loader, agents, OpenSandbox session, harness loop, CLI
-tasks/                one task per directory
-secrets/codex/        ChatGPT Codex login, ignored by git
-tests/                loader and harness tests, with a fake sandbox
-runs/                 local reports, ignored by git
-```
-
-The tests do not start Docker:
-
-```bash
-PYTHONPATH=src python -m unittest discover -s tests
-```
-
-## Operations
-
-API keys stay in the host environment. The harness injects them into the container only for the task provider and does not write them into the report. The Codex login file is the exception: it is copied into the sandbox home so Codex can use the ChatGPT plan. Do not commit it. Agent commands are untrusted code, and the container is the boundary.
-
-Stop the OpenSandbox server when it is not needed. `--keep` and a long timeout leave containers running until the TTL or an explicit destroy.
+See [architecture and recovery](docs/architecture.md) for guarantees and deployment limits. The tool boundary currently consists of the CLI and Python broker operations. MCP, arbitrary agent-authored code patches, native session restore, automatic GPU environment provisioning and multi-host brokers are future extensions.
