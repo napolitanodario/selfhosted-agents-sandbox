@@ -41,6 +41,40 @@ experimentctl submit examples/experiments/cpu-dev.yaml --request-id dev-001
 
 `cpu-dev` accepts trusted workloads only: it provides separate directories, **not security isolation**. Stopping `watch` stops observation, not the job. Before installation, commands also work as `PYTHONPATH=src .venv/bin/python -m experiment_orchestrator ...`.
 
+## Automatic deployment
+
+The [deployment workflow](.github/workflows/deploy.yml) tests each push to `main`
+and deploys it through a self-hosted GitHub Actions runner on the sandbox PC.
+Each release has its own Python venv; activation preserves shared configuration,
+SQLite state, credentials and running campaigns. Configure the runner label
+`experiment-orchestrator` and the repository variable `ORCHESTRATOR_DEPLOY_ROOT`.
+See [deployment setup and operation](docs/deployment.md). System dependencies and
+the OpenSandbox server are provisioned manually.
+
+## Monitoring dashboard
+
+**Observatory** is a responsive, read-only dashboard for this orchestrator's
+campaign agents and workloads across projects. It shows live agent output,
+campaign progress, execution attempts, collected artifacts, metric comparisons
+and resource history from the Ubuntu agent host. Remote GPU jobs remain separate
+from local agent sessions.
+
+Build the React Router and TypeScript frontend with Node.js 24, then serve it
+through the Python FastAPI service on the agent host:
+
+```bash
+npm --prefix dashboard ci --include=dev
+npm --prefix dashboard run build
+.venv/bin/python -m pip install -e '.[dashboard]'
+.venv/bin/experiment-dashboard --config orchestrator.yaml --local-no-auth
+```
+
+The command above enables loopback-only development access at
+`http://127.0.0.1:8787`. Production access requires a private token; HTTPS and
+Cloudflare Tunnel/Access setup are described in the
+[dashboard guide](docs/dashboard.md). Existing runs appear immediately; agent
+session telemetry is recorded by new invocations of the upgraded coordinator.
+
 ## Job operations
 
 ```bash

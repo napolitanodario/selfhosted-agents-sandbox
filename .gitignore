@@ -14,3 +14,9 @@ runs/
 orchestrator.local.yaml
 .python-version
 secrets/
+node_modules/
+.react-router/
+playwright-report/
+test-results/
+dashboard.local.yaml
+src/experiment_dashboard/static/

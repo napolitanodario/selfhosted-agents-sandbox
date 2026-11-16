@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shlex
 import sys
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
@@ -26,9 +27,34 @@ from agent_harness.models import (
     Task,
 )
 from agent_harness.session import SandboxFactory, SandboxSession
+from agent_harness.observation import Observer, notify, observation
 
 
 async def run_task(
+    task: Task,
+    *,
+    factory: SandboxFactory,
+    report_dir: Path,
+    keep: bool = False,
+    environ: dict[str, str] | None = None,
+    exports: tuple[str, ...] = (),
+    artifact_dir: Path | None = None,
+    observer: Observer | None = None,
+) -> RunReport:
+    """Run a task with optional observation isolated to this async context."""
+    with observation(observer):
+        return await _run_task(
+            task,
+            factory=factory,
+            report_dir=report_dir,
+            keep=keep,
+            environ=environ,
+            exports=exports,
+            artifact_dir=artifact_dir,
+        )
+
+
+async def _run_task(
     task: Task,
     *,
     factory: SandboxFactory,
@@ -70,6 +96,7 @@ async def run_task(
     try:
         print(f"==> {task.id}: creating sandbox ({task.image})", flush=True)
         session = await factory.open(task, plan.env)
+        notify("sandbox.created", sandbox_id=session.id)
         print(f"    sandbox {session.id}", flush=True)
         await _seed(session, task)
         if plan.auth_file is not None:
@@ -117,7 +144,9 @@ async def run_task(
         if session is not None and artifact_dir is not None:
             for relative in exports:
                 try:
-                    content = await session.read_text(f"{task.workdir.rstrip('/')}/{relative}")
+                    content = await session.read_text(
+                        f"{task.workdir.rstrip('/')}/{relative}"
+                    )
                     destination = artifact_dir / relative
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     temporary = destination.with_suffix(destination.suffix + ".tmp")
@@ -130,6 +159,7 @@ async def run_task(
         if session is not None and not keep:
             try:
                 await session.destroy()
+                notify("sandbox.destroyed", sandbox_id=session.id)
                 print(f"    sandbox {session.id} destroyed", flush=True)
             except Exception as exc:
                 message = f"failed to destroy sandbox: {exc}"
@@ -156,6 +186,13 @@ async def run_task(
         artifacts=artifacts,
     )
     report.report_path = str(_write_report(report, report_dir))
+    notify(
+        "task.finished",
+        status=status,
+        checks_passed=sum(check.passed for check in checks),
+        checks_total=len(checks),
+        error=error,
+    )
     print(f"[{status}] report {report.report_path}", flush=True)
     return report
 
@@ -244,15 +281,36 @@ async def _run_command(
 ) -> CommandResult:
     """Print a command, run it, and print output that was not already streamed."""
     print(f"\n$ [{label}] {command}", flush=True)
-    result = await session.run(command, cwd=cwd, timeout=timeout)
+    notify("command.started", label=label, command=command)
+    started = time.monotonic()
+    try:
+        result = await session.run(command, cwd=cwd, timeout=timeout)
+    except BaseException as exc:
+        notify(
+            "command.finished",
+            label=label,
+            exit_code=None,
+            error=str(exc),
+            seconds=time.monotonic() - started,
+        )
+        raise
     if not result.streamed:
         if result.stdout:
             print(result.stdout, flush=True)
+            notify("log", stream="stdout", text=result.stdout)
         if result.stderr:
             print(result.stderr, file=sys.stderr, flush=True)
+            notify("log", stream="stderr", text=result.stderr)
     if result.error:
         print(f"error: {result.error}", file=sys.stderr, flush=True)
     print(f"    exit {result.exit_code}", flush=True)
+    notify(
+        "command.finished",
+        label=label,
+        exit_code=result.exit_code,
+        error=result.error,
+        seconds=time.monotonic() - started,
+    )
     return result
 
 
@@ -279,7 +337,10 @@ def _check_record(check: Check, result: CommandResult) -> CheckRecord:
     reasons: list[str] = []
     if result.exit_code != check.expect_exit_code:
         reasons.append(f"exit {result.exit_code}, expected {check.expect_exit_code}")
-    if check.expect_stdout_contains and check.expect_stdout_contains not in result.stdout:
+    if (
+        check.expect_stdout_contains
+        and check.expect_stdout_contains not in result.stdout
+    ):
         reasons.append(f"stdout missing {check.expect_stdout_contains!r}")
     passed = not reasons
     detail = "ok" if passed else "; ".join(reasons)

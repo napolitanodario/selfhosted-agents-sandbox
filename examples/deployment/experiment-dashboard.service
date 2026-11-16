@@ -1,0 +1,17 @@
+[Unit]
+Description=Experiment Observatory dashboard
+After=network.target
+
+[Service]
+Type=simple
+# Change this deployment root to match ORCHESTRATOR_DEPLOY_ROOT.
+WorkingDirectory=%h/services/experiment-orchestrator/current
+EnvironmentFile=%h/services/experiment-orchestrator/shared/dashboard.env
+ExecStart=%h/services/experiment-orchestrator/current/.venv/bin/experiment-dashboard --config %h/services/experiment-orchestrator/shared/orchestrator.yaml
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

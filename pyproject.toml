@@ -24,6 +24,14 @@ dependencies = [
     "pyyaml>=6",
 ]
 
+[project.optional-dependencies]
+dashboard = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.34,<1",
+    "psutil>=6,<8",
+]
+dashboard-test = ["httpx>=0.28,<1"]
+
 [project.urls]
 Homepage = "https://github.com/napolitanodario/selfhosted-agents-sandbox"
 Repository = "https://github.com/napolitanodario/selfhosted-agents-sandbox"
@@ -31,6 +39,10 @@ Repository = "https://github.com/napolitanodario/selfhosted-agents-sandbox"
 [project.scripts]
 agent-harness = "agent_harness.cli:main"
 experimentctl = "experiment_orchestrator.cli:main"
+experiment-dashboard = "experiment_dashboard.cli:main"
+
+[tool.setuptools.package-data]
+experiment_dashboard = ["static/**/*", "static/*"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

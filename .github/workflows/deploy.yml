@@ -1,0 +1,88 @@
+name: Test and deploy orchestrator
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never interrupt an installation halfway through. Superseded queued runs may
+# be coalesced; deploy.py also checks main before activating a release.
+concurrency:
+  group: deploy-orchestrator-main
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Build and type check dashboard
+        working-directory: dashboard
+        run: |
+          npm ci --include=dev
+          npm run typecheck
+          npm run build
+      - name: Install Python package
+        run: python -m pip install '.[dashboard,dashboard-test]'
+      - name: Run tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+      - name: Check desktop and mobile monitoring
+        working-directory: dashboard
+        env:
+          DASHBOARD_TEST_PYTHON: python
+        run: |
+          npx playwright install --with-deps chromium
+          npm test
+      - name: Validate bundled tasks and CPU manifest
+        run: |
+          agent-harness validate
+          experimentctl validate examples/experiments/cpu-exact.yaml
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, experiment-orchestrator]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Install and activate release
+        env:
+          DEPLOY_ROOT: ${{ vars.ORCHESTRATOR_DEPLOY_ROOT }}
+          DEPLOY_PYTHON: ${{ vars.ORCHESTRATOR_PYTHON || 'python3' }}
+          GH_TOKEN: ${{ github.token }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          : "${DEPLOY_ROOT:?Set the ORCHESTRATOR_DEPLOY_ROOT repository variable to an absolute path outside the runner workspace}"
+          "$DEPLOY_PYTHON" scripts/deploy.py \
+            --source "$GITHUB_WORKSPACE" \
+            --root "$DEPLOY_ROOT" \
+            --python "$DEPLOY_PYTHON" \
+            --expected-revision "$GITHUB_SHA" \
+            --check-main

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Protocol
 
 from agent_harness.models import CommandResult, Task
+from agent_harness.observation import notify
 
 
 @dataclass(frozen=True)
@@ -114,7 +115,9 @@ def _unquote(value: str) -> str:
 
 def load_settings(environ: dict[str, str]) -> Settings:
     """Read server domain, protocol, API key, and proxy flag from the environment."""
-    api_key = environ.get("SANDBOX_API_KEY") or environ.get("OPEN_SANDBOX_API_KEY") or None
+    api_key = (
+        environ.get("SANDBOX_API_KEY") or environ.get("OPEN_SANDBOX_API_KEY") or None
+    )
     if api_key is not None and not api_key.strip():
         api_key = None
     timeout = environ.get("SANDBOX_REQUEST_TIMEOUT_SECONDS", "600")
@@ -215,11 +218,13 @@ class OpenSandboxSession:
             """Write one stdout chunk from the sandbox to this process."""
             sys.stdout.write(message.text)
             sys.stdout.flush()
+            notify("log", stream="stdout", text=message.text)
 
         async def on_stderr(message) -> None:
             """Write one stderr chunk from the sandbox to this process."""
             sys.stderr.write(message.text)
             sys.stderr.flush()
+            notify("log", stream="stderr", text=message.text)
 
         execution = await self._sandbox.commands.run(
             command,
